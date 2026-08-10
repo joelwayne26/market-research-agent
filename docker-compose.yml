@@ -1,0 +1,99 @@
+# ============================================
+# Market Research Agent - Docker Compose
+# Complete setup with PostgreSQL + Next.js
+# ============================================
+
+services:
+  # ============================================
+  # PostgreSQL Database with pgvector
+  # ============================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: market-research-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-market_research_db}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-market_research_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - market-research-network
+
+  # ============================================
+  # Next.js Application (Market Research Agent)
+  # ============================================
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: market-research-app
+    restart: unless-stopped
+    environment:
+      # Database Connection
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-market_research_db}
+      
+      # Next.js Configuration
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_NAME: "Market Research Agent"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      
+      # AI/LLM Configuration (Optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      
+      # Scraping Configuration
+      SCRAPING_USER_AGENT: ${SCRAPING_USER_AGENT:-MarketResearchAgent/1.0}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-5}
+      
+      # Redis (optional, for caching)
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./research-output:/app/research-output
+      - ./uploads:/app/uploads
+    networks:
+      - market-research-network
+
+  # ============================================
+  # Redis Cache (Optional)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: market-research-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - market-research-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  market-research-network:
+    driver: bridge
